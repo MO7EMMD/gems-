@@ -1,0 +1,154 @@
+{
+  "entities": {
+    "PilotProfile": {
+      "title": "PilotProfile",
+      "description": "Authenticated pilot career profile, unlocked mission tiers, high score, and control preferences.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID."
+        },
+        "callsign": {
+          "type": "string",
+          "description": "Pilot display callsign."
+        },
+        "totalFlights": {
+          "type": "integer",
+          "description": "Total number of simulated landing attempts."
+        },
+        "successfulLandings": {
+          "type": "integer",
+          "description": "Total number of safe touchdowns."
+        },
+        "highestScore": {
+          "type": "integer",
+          "description": "Best single-flight score across all missions."
+        },
+        "highestUnlockedTier": {
+          "type": "integer",
+          "description": "Highest unlocked planetary mission tier (1 to 4)."
+        },
+        "tiltControlEnabled": {
+          "type": "boolean",
+          "description": "Whether accelerometer tilt steering is enabled."
+        },
+        "soundEnabled": {
+          "type": "boolean",
+          "description": "Whether synthesized thruster audio is enabled."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Profile creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Profile update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "callsign",
+        "totalFlights",
+        "successfulLandings",
+        "highestScore",
+        "highestUnlockedTier",
+        "tiltControlEnabled",
+        "soundEnabled",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FlightLog": {
+      "title": "FlightLog",
+      "description": "Immutable flight recorder telemetry entry for a single planetary landing mission attempt.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID."
+        },
+        "missionId": {
+          "type": "string",
+          "enum": ["moon_tranquility", "mars_jezero", "europa_ridge", "titan_dune"],
+          "description": "Identifier of the planetary mission."
+        },
+        "missionName": {
+          "type": "string",
+          "description": "Localized name of the mission."
+        },
+        "success": {
+          "type": "boolean",
+          "description": "True if the spacecraft landed safely within zone and velocity tolerances."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Calculated mission score based on precision, softness, and remaining fuel."
+        },
+        "ratingStars": {
+          "type": "integer",
+          "description": "Star rating from 0 to 3."
+        },
+        "touchdownVerticalSpeed": {
+          "type": "number",
+          "description": "Vertical impact speed in m/s at touchdown."
+        },
+        "touchdownHorizontalSpeed": {
+          "type": "number",
+          "description": "Horizontal drift speed in m/s at touchdown."
+        },
+        "touchdownTiltDeg": {
+          "type": "number",
+          "description": "Spacecraft pitch tilt angle in degrees at touchdown."
+        },
+        "fuelRemainingPercent": {
+          "type": "number",
+          "description": "Remaining propellant percentage (0 to 100)."
+        },
+        "flightDurationSec": {
+          "type": "number",
+          "description": "Total flight duration in seconds."
+        },
+        "failureReason": {
+          "type": "string",
+          "description": "Optional cause of crash or abort if unsuccessful."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Flight log timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "missionId",
+        "missionName",
+        "success",
+        "score",
+        "ratingStars",
+        "touchdownVerticalSpeed",
+        "touchdownHorizontalSpeed",
+        "touchdownTiltDeg",
+        "fuelRemainingPercent",
+        "flightDurationSec",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PilotProfile"
+      },
+      "description": "Per-user pilot career profile and mission progression."
+    },
+    "/users/{userId}/flight_logs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/FlightLog"
+      },
+      "description": "Per-user immutable flight recorder logs."
+    }
+  }
+}

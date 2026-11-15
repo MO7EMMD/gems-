@@ -1,0 +1,6 @@
+{
+  "name": "هبوط الصقر",
+  "description": "لعبة محاكاة فيزيائية واقعية لهبوط المركبات الفضائية مع ديناميكا الجاذبية والوقود والرياح والتضاريس.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

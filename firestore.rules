@@ -1,0 +1,166 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny everything unless explicitly permitted
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation Helper: PilotProfile
+    function isValidPilotProfile(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.userId.size() <= 128 &&
+             data.callsign is string &&
+             data.callsign.size() >= 1 &&
+             data.callsign.size() <= 40 &&
+             data.totalFlights is int &&
+             data.totalFlights >= 0 &&
+             data.totalFlights <= 1000000 &&
+             data.successfulLandings is int &&
+             data.successfulLandings >= 0 &&
+             data.successfulLandings <= data.totalFlights &&
+             data.highestScore is int &&
+             data.highestScore >= 0 &&
+             data.highestScore <= 100000 &&
+             data.highestUnlockedTier is int &&
+             data.highestUnlockedTier >= 1 &&
+             data.highestUnlockedTier <= 4 &&
+             data.tiltControlEnabled is bool &&
+             data.soundEnabled is bool;
+    }
+
+    // Validation Helper: FlightLog
+    function isValidFlightLog(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.userId.size() <= 128 &&
+             data.missionId is string &&
+             data.missionId.size() >= 1 &&
+             data.missionId.size() <= 40 &&
+             data.missionId in ['moon_tranquility', 'mars_jezero', 'europa_ridge', 'titan_dune'] &&
+             data.missionName is string &&
+             data.missionName.size() >= 1 &&
+             data.missionName.size() <= 80 &&
+             data.success is bool &&
+             data.score is int &&
+             data.score >= 0 &&
+             data.score <= 100000 &&
+             data.ratingStars is int &&
+             data.ratingStars >= 0 &&
+             data.ratingStars <= 3 &&
+             data.touchdownVerticalSpeed is number &&
+             data.touchdownVerticalSpeed >= 0 &&
+             data.touchdownVerticalSpeed <= 5000 &&
+             data.touchdownHorizontalSpeed is number &&
+             data.touchdownHorizontalSpeed >= 0 &&
+             data.touchdownHorizontalSpeed <= 5000 &&
+             data.touchdownTiltDeg is number &&
+             data.touchdownTiltDeg >= 0 &&
+             data.touchdownTiltDeg <= 180 &&
+             data.fuelRemainingPercent is number &&
+             data.fuelRemainingPercent >= 0 &&
+             data.fuelRemainingPercent <= 100 &&
+             data.flightDurationSec is number &&
+             data.flightDurationSec >= 0 &&
+             data.flightDurationSec <= 86400 &&
+             (!('failureReason' in data) || data.failureReason == null || (data.failureReason is string && data.failureReason.size() <= 120));
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'callsign', 'totalFlights', 'successfulLandings',
+                         'highestScore', 'highestUnlockedTier', 'tiltControlEnabled',
+                         'soundEnabled', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'callsign', 'totalFlights', 'successfulLandings',
+                         'highestScore', 'highestUnlockedTier', 'tiltControlEnabled',
+                         'soundEnabled', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp &&
+                       incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp &&
+                       incoming().updatedAt <= request.time &&
+                       isValidPilotProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidPilotProfile(incoming()) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp &&
+                       incoming().updatedAt <= request.time &&
+                       (
+                         // Action: Update flight career stats
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'totalFlights', 'successfulLandings', 'highestScore',
+                           'highestUnlockedTier', 'updatedAt'
+                         ]) ||
+                         // Action: Update callsign or control preferences
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'callsign', 'tiltControlEnabled', 'soundEnabled', 'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /flight_logs/{logId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(logId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(logId) &&
+                         request.auth.uid == userId &&
+                         exists(/databases/$(database)/documents/users/$(userId)) &&
+                         incoming().keys().hasAll([
+                           'userId', 'missionId', 'missionName', 'success', 'score',
+                           'ratingStars', 'touchdownVerticalSpeed', 'touchdownHorizontalSpeed',
+                           'touchdownTiltDeg', 'fuelRemainingPercent', 'flightDurationSec',
+                           'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'missionId', 'missionName', 'success', 'score',
+                           'ratingStars', 'touchdownVerticalSpeed', 'touchdownHorizontalSpeed',
+                           'touchdownTiltDeg', 'fuelRemainingPercent', 'flightDurationSec',
+                           'failureReason', 'createdAt'
+                         ]) &&
+                         incoming().createdAt is timestamp &&
+                         incoming().createdAt <= request.time &&
+                         isValidFlightLog(incoming());
+
+        // Flight recorder logs are immutable once recorded
+        allow update: if false;
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(logId) && request.auth.uid == userId;
+      }
+    }
+  }
+}
