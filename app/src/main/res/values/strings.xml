@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">هبوط الصقر</string>
+    <string name="brand_logo_cd">شعار mo7mels لحماية الحقوق</string>
+    <string name="copyright_notice_full">© 2026 mo7mels — جميع الحقوق محفوظة</string>
+    <string name="copyright_notice_short">© mo7mels</string>
 </resources>

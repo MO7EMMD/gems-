@@ -74,7 +74,7 @@ class FlightViewModel(
                     }
                 } else {
                     soundSynth.updateTelemetry(0f, rcs = false, lowAltDanger = false)
-                    if (current.particles.isNotEmpty()) {
+                    if (current.phase != FlightPhase.PAUSED && current.particles.isNotEmpty()) {
                         _simState.value = physics.step(current, dt, 0f, null)
                     }
                 }

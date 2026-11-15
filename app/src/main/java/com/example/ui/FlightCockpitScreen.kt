@@ -14,10 +14,12 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,7 +76,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -88,6 +97,9 @@ import com.example.data.model.MissionDefinition
 import com.example.game.FlightPhase
 import com.example.game.LanderSimState
 import com.example.game.ParticleKind
+import com.example.ui.components.BrandCopyrightBadge
+import com.example.ui.components.TelemetryHudData
+import com.example.ui.components.TelemetryHudOverlay
 import com.example.ui.theme.CockpitBorder
 import com.example.ui.theme.CriticalCrimson
 import com.example.ui.theme.SafeEmerald
@@ -162,11 +174,67 @@ fun FlightCockpitScreen(
         }
     }
 
-    Box(
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpaceVoid),
+            .background(SpaceVoid)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                val isDown = keyEvent.type == KeyEventType.KeyDown
+                val isUp = keyEvent.type == KeyEventType.KeyUp
+                when (keyEvent.key) {
+                    Key.W, Key.DirectionUp, Key.Spacebar -> {
+                        if (isDown) flightViewModel.setTargetThrottle(1f)
+                        else if (isUp) flightViewModel.setTargetThrottle(0f)
+                        true
+                    }
+                    Key.S, Key.DirectionDown -> {
+                        if (isDown) flightViewModel.setTargetThrottle(0f)
+                        true
+                    }
+                    Key.E -> {
+                        if (isDown) flightViewModel.setTargetThrottle((simState.targetThrottle + 0.15f).coerceIn(0f, 1f))
+                        true
+                    }
+                    Key.Q -> {
+                        if (isDown) flightViewModel.setTargetThrottle((simState.targetThrottle - 0.15f).coerceIn(0f, 1f))
+                        true
+                    }
+                    Key.A, Key.DirectionLeft -> {
+                        if (isDown) flightViewModel.setRcsInput(-1f)
+                        else if (isUp) flightViewModel.setRcsInput(0f)
+                        true
+                    }
+                    Key.D, Key.DirectionRight -> {
+                        if (isDown) flightViewModel.setRcsInput(1f)
+                        else if (isUp) flightViewModel.setRcsInput(0f)
+                        true
+                    }
+                    Key.T -> {
+                        if (isDown) flightViewModel.toggleSas()
+                        true
+                    }
+                    Key.P, Key.Escape -> {
+                        if (isDown) flightViewModel.togglePause()
+                        true
+                    }
+                    Key.R -> {
+                        if (isDown && simState.phase != FlightPhase.FLYING) {
+                            flightViewModel.restartMission()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            },
     ) {
+        val isWideScreen = maxWidth >= 660.dp
         // 1. Full-Bleed Physics Simulation Canvas
         LanderSimulationCanvas(
             state = simState,
@@ -181,16 +249,24 @@ fun FlightCockpitScreen(
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // Top Telemetry Strip
-            CockpitTelemetryHud(
-                state = simState,
-                onToggleSas = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    flightViewModel.toggleSas()
-                },
-                onTogglePause = { flightViewModel.togglePause() },
-                onExit = onExitToBriefing,
-            )
+            // Top Telemetry Strip + Copyright Watermark
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                CockpitTelemetryHud(
+                    state = simState,
+                    onToggleSas = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        flightViewModel.toggleSas()
+                    },
+                    onTogglePause = { flightViewModel.togglePause() },
+                    onExit = onExitToBriefing,
+                )
+                BrandCopyrightBadge(
+                    compact = true,
+                    modifier = Modifier.align(Alignment.End),
+                )
+            }
 
             // Bottom Ergonomic Touch Controls (visible while flying)
             if (simState.phase == FlightPhase.FLYING) {
@@ -213,6 +289,21 @@ fun FlightCockpitScreen(
                             flightViewModel.setRcsInput(input)
                         },
                     )
+
+                    if (isWideScreen) {
+                        Surface(
+                            color = SpaceObsidian.copy(alpha = 0.82f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.border(1.dp, CockpitBorder, RoundedCornerShape(12.dp)),
+                        ) {
+                            Text(
+                                text = "لوحة المفاتيح: W/Space دفع • A/D تدوير • Q/E تدريجي • T تثبيت • P إيقاف",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TelemetryCyan,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
 
                     // Right: Analog Throttle Lever + Quick Cut/Max
                     ThrottleControlColumn(
@@ -421,20 +512,82 @@ private fun LanderSimulationCanvas(
             )
         }
 
-        // Particles (dust, exhaust, RCS, sparks)
+        // Particles (dust, exhaust, RCS, sparks, explosion)
         for (p in state.particles) {
             val alpha = (1f - p.life / p.maxLife).coerceIn(0f, 1f)
-            val pColor = when (p.kind) {
-                ParticleKind.EXHAUST_FLAME -> if (alpha > 0.65f) Color(0xFFFFF3C4) else ThrusterOrange
-                ParticleKind.RCS_PUFF -> Color(0xFFE2E8F0)
-                ParticleKind.REGOLITH_DUST -> mission.terrainTopColor
-                ParticleKind.DEBRIS_SPARK -> ThrusterAmber
+            val age = 1f - alpha
+            val center = Offset(toScreenX(p.x), toScreenY(p.y))
+            val baseRadius = p.size * (pxPerMeter * 0.28f)
+            when (p.kind) {
+                ParticleKind.EXHAUST_FLAME -> {
+                    val lowFuel = state.fuelPercent < 20f
+                    val outerColor = if (lowFuel) CriticalCrimson else ThrusterOrange
+                    val coreColor = if (lowFuel) ThrusterAmber else Color(0xFFFFF3C4)
+                    drawCircle(
+                        color = outerColor.copy(alpha = alpha * 0.42f),
+                        radius = baseRadius * (1.55f + age * 0.7f),
+                        center = center,
+                    )
+                    drawCircle(
+                        color = coreColor.copy(alpha = alpha * 0.90f),
+                        radius = baseRadius * (0.45f + alpha * 0.55f),
+                        center = center,
+                    )
+                }
+
+                ParticleKind.EXPLOSION_FIREBALL -> {
+                    val outerBlast = if (age < 0.55f) ThrusterOrange else CriticalCrimson
+                    val coreBlast = if (age < 0.35f) Color(0xFFFEF9C3) else ThrusterAmber
+                    drawCircle(
+                        color = outerBlast.copy(alpha = alpha * 0.50f),
+                        radius = baseRadius * (1.2f + age * 1.3f) * 1.6f,
+                        center = center,
+                    )
+                    drawCircle(
+                        color = coreBlast.copy(alpha = alpha * 0.92f),
+                        radius = baseRadius * (1.05f - age * 0.4f).coerceAtLeast(0.3f),
+                        center = center,
+                    )
+                }
+
+                ParticleKind.EXPLOSION_SHOCKWAVE -> {
+                    drawCircle(
+                        color = ThrusterAmber.copy(alpha = alpha * 0.78f),
+                        radius = baseRadius * (0.6f + age * 4.5f),
+                        center = center,
+                        style = Stroke(width = (5f * alpha).coerceAtLeast(1.5f)),
+                    )
+                }
+
+                ParticleKind.DEBRIS_SPARK -> {
+                    drawCircle(
+                        color = ThrusterOrange.copy(alpha = alpha * 0.48f),
+                        radius = baseRadius * 2.0f,
+                        center = center,
+                    )
+                    drawCircle(
+                        color = Color(0xFFFEF08A).copy(alpha = alpha * 0.95f),
+                        radius = baseRadius,
+                        center = center,
+                    )
+                }
+
+                ParticleKind.RCS_PUFF -> {
+                    drawCircle(
+                        color = Color(0xFFE2E8F0).copy(alpha = alpha * 0.85f),
+                        radius = baseRadius,
+                        center = center,
+                    )
+                }
+
+                ParticleKind.REGOLITH_DUST -> {
+                    drawCircle(
+                        color = mission.terrainTopColor.copy(alpha = alpha * 0.80f),
+                        radius = baseRadius * (1f + age * 0.8f),
+                        center = center,
+                    )
+                }
             }
-            drawCircle(
-                color = pColor.copy(alpha = alpha * 0.85f),
-                radius = p.size * (pxPerMeter * 0.28f),
-                center = Offset(toScreenX(p.x), toScreenY(p.y)),
-            )
         }
 
         // Radar laser drop line to surface directly below lander
@@ -667,24 +820,9 @@ private fun CockpitTelemetryHud(
     onExit: () -> Unit,
 ) {
     val mission = state.mission
-    val vSpeedColor = when {
-        state.verticalSpeedAbs <= mission.safeVerticalSpeed * 0.7f -> SafeEmerald
-        state.verticalSpeedAbs <= mission.safeVerticalSpeed -> ThrusterAmber
-        else -> CriticalCrimson
-    }
-    val hSpeedColor = when {
-        state.horizontalSpeedAbs <= mission.safeHorizontalSpeed * 0.7f -> SafeEmerald
-        state.horizontalSpeedAbs <= mission.safeHorizontalSpeed -> ThrusterAmber
-        else -> CriticalCrimson
-    }
     val tiltColor = when {
         abs(state.angleDeg) <= mission.safeTiltDeg * 0.7f -> SafeEmerald
         abs(state.angleDeg) <= mission.safeTiltDeg -> ThrusterAmber
-        else -> CriticalCrimson
-    }
-    val fuelColor = when {
-        state.fuelPercent > 30f -> TelemetryCyan
-        state.fuelPercent > 12f -> ThrusterAmber
         else -> CriticalCrimson
     }
 
@@ -772,99 +910,28 @@ private fun CockpitTelemetryHud(
             }
         }
 
-        // Telemetry Strip
-        Surface(
-            color = SpaceObsidian.copy(alpha = 0.82f),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, CockpitBorder, RoundedCornerShape(16.dp)),
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    HudMetric(
-                        label = "الارتفاع",
-                        value = "${String.format("%.1f", state.altitudeAgl)}m",
-                        color = TelemetryCyan,
-                    )
-                    HudMetric(
-                        label = "عمودي",
-                        value = "${String.format("%.1f", state.vy)}m/s",
-                        color = vSpeedColor,
-                    )
-                    HudMetric(
-                        label = "أفقي",
-                        value = "${String.format("%.1f", state.vx)}m/s",
-                        color = hSpeedColor,
-                    )
-                    HudMetric(
-                        label = "الميلان",
-                        value = "${String.format("%.0f", state.angleDeg)}°",
-                        color = tiltColor,
-                    )
-                    if (mission.atmosphericDensity > 0f) {
-                        HudMetric(
-                            label = "الرياح",
-                            value = "${String.format("%.1f", state.currentWindSpeed)}",
-                            color = ThrusterAmber,
-                        )
-                    } else {
-                        HudMetric(
-                            label = "الجاذبية",
-                            value = "${String.format("%.2f", state.gForce)}G",
-                            color = Color.White,
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "الوقود ${String.format("%.0f", state.fuelKg)} kg",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = fuelColor,
-                    )
-                    LinearProgressIndicator(
-                        progress = { state.fuelPercent / 100f },
-                        color = fuelColor,
-                        trackColor = SpaceCarbon,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(7.dp)
-                            .clip(RoundedCornerShape(4.dp)),
-                    )
-                    Text(
-                        text = "${String.format("%.0f", state.fuelPercent)}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = fuelColor,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HudMetric(label: String, value: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontFamily = TelemetryMonoFontFamily,
-                fontWeight = FontWeight.Bold,
+        // Real-time Heads-Up Display (HUD) Overlay
+        TelemetryHudOverlay(
+            data = TelemetryHudData(
+                altitudeMeters = state.altitudeAgl,
+                verticalVelocityMps = state.vy,
+                horizontalVelocityMps = state.vx,
+                fuelPercent = state.fuelPercent,
+                safeVerticalSpeedMps = mission.safeVerticalSpeed,
+                safeHorizontalSpeedMps = mission.safeHorizontalSpeed,
+                isBurningFuel = state.actualThrottle > 0.03f || abs(state.rcsCommand) > 0.1f,
+                fuelMassLabel = "${String.format("%.0f", state.fuelKg)}kg",
+                extraMetricLabel = "الميلان",
+                extraMetricValue = "${String.format("%.0f", state.angleDeg)}°",
+                extraMetricColor = tiltColor,
+                secondaryExtraLabel = if (mission.atmosphericDensity > 0f) "الرياح" else "الجاذبية",
+                secondaryExtraValue = if (mission.atmosphericDensity > 0f) {
+                    "${String.format("%.1f", state.currentWindSpeed)}"
+                } else {
+                    "${String.format("%.2f", state.gForce)}G"
+                },
+                secondaryExtraColor = if (mission.atmosphericDensity > 0f) ThrusterAmber else Color.White,
             ),
-            color = color,
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -1102,7 +1169,7 @@ private fun PauseOverlay(
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("متابعة الهبوط")
+                    Text("Resume • استئناف")
                 }
                 OutlinedButton(
                     onClick = onRestart,
@@ -1113,7 +1180,7 @@ private fun PauseOverlay(
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("إعادة الإطلاق")
+                    Text("Restart • إعادة البدء")
                 }
                 OutlinedButton(
                     onClick = onExit,
@@ -1123,6 +1190,7 @@ private fun PauseOverlay(
                 ) {
                     Text("العودة لمركز القيادة")
                 }
+                BrandCopyrightBadge(compact = true)
             }
         }
     }
@@ -1258,6 +1326,8 @@ private fun FlightDebriefOverlay(
             ) {
                 Text("العودة لمركز القيادة")
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            BrandCopyrightBadge(compact = true)
         }
     }
 }

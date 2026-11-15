@@ -1,5 +1,6 @@
 package com.example.auth
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,6 +32,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import com.example.R
+import com.example.ui.components.BrandCopyrightBadge
 import com.example.ui.theme.CockpitBorder
 import com.example.ui.theme.CriticalCrimson
 import com.example.ui.theme.SafeEmerald
@@ -66,7 +69,9 @@ import com.example.ui.theme.ThrusterAmber
 @Composable
 fun AuthScreen(
     onAuthSuccess: () -> Unit,
+    onContinueAsGuest: () -> Unit = {},
 ) {
+    BackHandler(onBack = onContinueAsGuest)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -281,6 +286,31 @@ fun AuthScreen(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = onContinueAsGuest,
+                    enabled = !isLoading,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("continue_as_guest_button"),
+                ) {
+                    Text(
+                        text = "اللعب بدون تسجيل دخول (اختياري)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                BrandCopyrightBadge(
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = false,
+                )
             }
         }
     }

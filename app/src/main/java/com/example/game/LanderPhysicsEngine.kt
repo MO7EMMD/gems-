@@ -22,6 +22,8 @@ enum class ParticleKind {
     RCS_PUFF,
     REGOLITH_DUST,
     DEBRIS_SPARK,
+    EXPLOSION_FIREBALL,
+    EXPLOSION_SHOCKWAVE,
 }
 
 data class SimParticle(
@@ -92,16 +94,24 @@ class LanderPhysicsEngine {
         private const val RAD_TO_DEG = 57.29578f
     }
 
-    fun createInitialState(mission: MissionDefinition, sasEnabled: Boolean = true): LanderSimState {
-        val rng = Random(mission.seed)
-        val padCenter = when (mission.tier) {
-            1 -> 0f
-            2 -> 18f
-            3 -> -16f
-            else -> -12f
+    fun createInitialState(
+        mission: MissionDefinition,
+        sasEnabled: Boolean = true,
+        randomSeed: Long? = null,
+    ): LanderSimState {
+        val rng = if (randomSeed != null) Random(randomSeed) else Random.Default
+        val padCenter = if (randomSeed != null) {
+            when (mission.tier) {
+                1 -> 0f
+                2 -> 18f
+                3 -> -16f
+                else -> -12f
+            }
+        } else {
+            (rng.nextFloat() * 90f) - 45f
         }
-        val padElev = 18f
-        val terrain = generateTerrain(mission, padCenter, padElev, rng)
+        val padElev = 16f + rng.nextFloat() * 10f
+        val terrain = generateRandomTerrain(mission, padCenter, padElev, rng)
         val stars = List(95) {
             StarPoint(
                 normX = rng.nextFloat(),
@@ -111,7 +121,7 @@ class LanderPhysicsEngine {
             )
         }
         val startY = padElev + mission.startAltitudeMeters
-        val startX = padCenter + mission.startHorizontalOffset
+        val startX = (padCenter + mission.startHorizontalOffset).coerceIn(-WORLD_HALF_WIDTH + 30f, WORLD_HALF_WIDTH - 30f)
         val initialAgl = computeAltitudeAgl(startX, startY, 0f, terrain)
 
         return LanderSimState(
@@ -141,23 +151,24 @@ class LanderPhysicsEngine {
         )
     }
 
-    private fun generateTerrain(
+    fun generateRandomTerrain(
         mission: MissionDefinition,
         padCenter: Float,
         padElevation: Float,
-        rng: Random,
+        rng: Random = Random.Default,
     ): List<TerrainPoint> {
         val count = 161
         val step = (WORLD_HALF_WIDTH * 2f) / (count - 1)
         val halfPad = mission.padWidthMeters * 0.5f
         val roughness = when (mission.tier) {
-            1 -> 1.0f
-            2 -> 1.2f
+            1 -> 1.05f
+            2 -> 1.25f
             3 -> 1.65f
-            else -> 1.15f
+            else -> 1.2f
         }
         val phase1 = rng.nextFloat() * 6.28f
         val phase2 = rng.nextFloat() * 6.28f
+        val phase3 = rng.nextFloat() * 6.28f
 
         return List(count) { i ->
             val wx = -WORLD_HALF_WIDTH + i * step
@@ -166,10 +177,12 @@ class LanderPhysicsEngine {
                 padElevation
             } else {
                 val edgeDist = distFromPad - halfPad
-                val blend = min(1f, edgeDist / 22f)
-                val wave = sin(wx * 0.045f + phase1) * 14f +
-                    cos(wx * 0.11f + phase2) * 8f +
-                    sin(wx * 0.27f) * 3.5f
+                val blend = min(1f, edgeDist / 20f)
+                val jitter = (rng.nextFloat() - 0.5f) * 5.2f * roughness
+                val wave = sin(wx * 0.048f + phase1) * 15f +
+                    cos(wx * 0.115f + phase2) * 9f +
+                    sin(wx * 0.26f + phase3) * 4.5f +
+                    jitter
                 val ridgeBoost = if (mission.tier == 3 && edgeDist in 6f..42f) 18f else 0f
                 val boundaryWall = if (abs(wx) > WORLD_HALF_WIDTH - 24f) {
                     (abs(wx) - (WORLD_HALF_WIDTH - 24f)) * 1.4f
@@ -199,17 +212,20 @@ class LanderPhysicsEngine {
         val mission = state.mission
         val nextTime = state.elapsedTimeSec + dt
 
-        // 1. Engine throttle spooling & propellant check
-        val requestedThrottle = if (state.fuelKg > 0.05f) state.targetThrottle.coerceIn(0f, 1f) else 0f
-        val actualThrottle = if (state.fuelKg > 0.05f) {
+        // 1. Engine throttle spooling & propellant check (main + RCS thrusters)
+        val hasFuel = state.fuelKg > 0.01f
+        val requestedThrottle = if (hasFuel) state.targetThrottle.coerceIn(0f, 1f) else 0f
+        val actualThrottle = if (hasFuel) {
             val delta = requestedThrottle - state.actualThrottle
             (state.actualThrottle + delta * min(1f, dt * 7.0f)).coerceIn(0f, 1f)
         } else {
             0f
         }
+        val activeRcs = if (hasFuel) rcsInput.coerceIn(-1f, 1f) else 0f
 
-        val fuelBurn = actualThrottle * mission.specificImpulseBurnRate * dt
-        val nextFuel = max(0f, state.fuelKg - fuelBurn)
+        val mainFuelBurn = actualThrottle * mission.specificImpulseBurnRate * dt
+        val rcsFuelBurn = abs(activeRcs) * 1.8f * dt
+        val nextFuel = max(0f, state.fuelKg - mainFuelBurn - rcsFuelBurn)
         val totalMass = mission.dryMassKg + nextFuel
 
         // 2. Wind field & aerodynamic drag
@@ -222,8 +238,8 @@ class LanderPhysicsEngine {
         }
 
         // 3. Attitude dynamics (RCS + Gyroscopic SAS + optional Tilt Steering)
-        var angularAccel = rcsInput.coerceIn(-1f, 1f) * 2.65f
-        if (tiltAngleTargetRad != null && abs(rcsInput) < 0.05f) {
+        var angularAccel = activeRcs * 2.65f
+        if (tiltAngleTargetRad != null && abs(activeRcs) < 0.05f) {
             val angleErr = (tiltAngleTargetRad.coerceIn(-0.7f, 0.7f) - state.angleRad)
             angularAccel += angleErr * 5.2f - state.angularVelRad * 3.8f
         } else if (state.sasEnabled && abs(rcsInput) < 0.05f) {
@@ -418,23 +434,14 @@ class LanderPhysicsEngine {
                     padAccuracyPercent = padAccuracy,
                 )
             } else {
-                // Spawn crash sparks/debris
-                repeat(28) {
-                    val sparkAngle = rng.nextFloat() * PI.toFloat()
-                    val speed = 6f + rng.nextFloat() * 22f
-                    updatedParticles.add(
-                        SimParticle(
-                            x = nextX,
-                            y = snappedY - 0.5f,
-                            vx = cos(sparkAngle) * speed,
-                            vy = sin(sparkAngle) * speed,
-                            life = 0f,
-                            maxLife = 0.7f + rng.nextFloat() * 0.6f,
-                            size = 1.5f + rng.nextFloat() * 2.2f,
-                            kind = ParticleKind.DEBRIS_SPARK,
-                        )
-                    )
-                }
+                val impactSpeed = hypot(nextVx, nextVy)
+                spawnCrashExplosion(
+                    target = updatedParticles,
+                    impactX = nextX,
+                    impactY = snappedY - 0.5f,
+                    impactSpeed = impactSpeed,
+                    rng = rng,
+                )
 
                 return state.copy(
                     phase = FlightPhase.CRASHED,
@@ -462,6 +469,31 @@ class LanderPhysicsEngine {
             }
         }
 
+        // 7. End game immediately if propellant reaches zero in mid-air
+        if (nextFuel <= 0f) {
+            return state.copy(
+                phase = FlightPhase.CRASHED,
+                x = nextX,
+                y = nextY,
+                vx = nextVx,
+                vy = nextVy,
+                angleRad = nextAngle,
+                angularVelRad = nextAngularVel,
+                actualThrottle = 0f,
+                targetThrottle = 0f,
+                rcsCommand = 0f,
+                fuelKg = 0f,
+                currentWindSpeed = windX,
+                altitudeAgl = agl,
+                gForce = gForce,
+                elapsedTimeSec = nextTime,
+                particles = updatedParticles,
+                touchdownScore = 0,
+                touchdownStars = 0,
+                failureReasonAr = "نفاد الوقود بالكامل — انتهت المهمة",
+            )
+        }
+
         return state.copy(
             x = nextX,
             y = nextY,
@@ -481,6 +513,83 @@ class LanderPhysicsEngine {
         )
     }
 
+    private fun spawnCrashExplosion(
+        target: MutableList<SimParticle>,
+        impactX: Float,
+        impactY: Float,
+        impactSpeed: Float,
+        rng: Random,
+    ) {
+        val energy = (impactSpeed / 12f).coerceIn(0.8f, 1.9f)
+
+        // Shockwave ring
+        target.add(
+            SimParticle(
+                x = impactX,
+                y = impactY,
+                vx = 0f,
+                vy = 0f,
+                life = 0f,
+                maxLife = 0.55f,
+                size = 8.5f * energy,
+                kind = ParticleKind.EXPLOSION_SHOCKWAVE,
+            )
+        )
+
+        // Expanding explosion fireballs
+        repeat(20) {
+            val angle = rng.nextFloat() * PI.toFloat()
+            val speed = (3.5f + rng.nextFloat() * 14f) * energy
+            target.add(
+                SimParticle(
+                    x = impactX + (rng.nextFloat() - 0.5f) * 2.2f,
+                    y = impactY + 0.5f,
+                    vx = cos(angle) * speed,
+                    vy = sin(angle) * speed * 0.85f,
+                    life = 0f,
+                    maxLife = 0.45f + rng.nextFloat() * 0.45f,
+                    size = (3.2f + rng.nextFloat() * 3.8f) * energy.coerceAtMost(1.45f),
+                    kind = ParticleKind.EXPLOSION_FIREBALL,
+                )
+            )
+        }
+
+        // High-velocity glowing debris sparks
+        repeat(34) {
+            val sparkAngle = 0.12f + rng.nextFloat() * (PI.toFloat() - 0.24f)
+            val speed = (8f + rng.nextFloat() * 26f) * energy
+            target.add(
+                SimParticle(
+                    x = impactX,
+                    y = impactY,
+                    vx = cos(sparkAngle) * speed,
+                    vy = sin(sparkAngle) * speed,
+                    life = 0f,
+                    maxLife = 0.75f + rng.nextFloat() * 0.7f,
+                    size = 1.6f + rng.nextFloat() * 2.4f,
+                    kind = ParticleKind.DEBRIS_SPARK,
+                )
+            )
+        }
+
+        // Crater regolith dust cloud
+        repeat(12) {
+            val dir = if (rng.nextBoolean()) 1f else -1f
+            target.add(
+                SimParticle(
+                    x = impactX + (rng.nextFloat() - 0.5f) * 3f,
+                    y = impactY + 0.4f,
+                    vx = dir * (4f + rng.nextFloat() * 10f) * energy,
+                    vy = 2f + rng.nextFloat() * 6f,
+                    life = 0f,
+                    maxLife = 0.8f + rng.nextFloat() * 0.55f,
+                    size = 3.5f + rng.nextFloat() * 3.5f,
+                    kind = ParticleKind.REGOLITH_DUST,
+                )
+            )
+        }
+    }
+
     private fun updateParticles(
         particles: List<SimParticle>,
         dt: Float,
@@ -494,25 +603,34 @@ class LanderPhysicsEngine {
                 val gy = when (p.kind) {
                     ParticleKind.DEBRIS_SPARK -> -gravity * 1.4f
                     ParticleKind.REGOLITH_DUST -> -gravity * 0.35f
+                    ParticleKind.EXPLOSION_FIREBALL -> 2.4f // Buoyant rising fireball
                     else -> 0f
                 }
-                val nextVx = p.vx * (1f - dt * 1.1f)
-                val nextVy = p.vy + gy * dt
+                val drag = when (p.kind) {
+                    ParticleKind.EXPLOSION_FIREBALL -> 2.4f
+                    ParticleKind.EXPLOSION_SHOCKWAVE -> 0f
+                    else -> 1.1f
+                }
+                var nextVx = p.vx * (1f - dt * drag)
+                var nextVy = p.vy + gy * dt
                 val nx = p.x + nextVx * dt
-                val ny = p.y + nextVy * dt
+                var ny = p.y + nextVy * dt
                 val gH = terrainHeightAt(nx, terrain)
-                val clampedY = if (ny < gH && p.kind == ParticleKind.EXHAUST_FLAME) gH + 0.1f else ny
-                val deflectedVx = if (ny < gH && p.kind == ParticleKind.EXHAUST_FLAME) {
-                    nextVx + (if (nextVx >= 0f) 6f else -6f)
-                } else {
-                    nextVx
+                if (ny < gH && p.kind == ParticleKind.EXHAUST_FLAME) {
+                    ny = gH + 0.1f
+                    nextVx += if (nextVx >= 0f) 6f else -6f
+                    nextVy = 1.8f
+                } else if (ny <= gH && p.kind == ParticleKind.DEBRIS_SPARK) {
+                    ny = gH + 0.15f
+                    nextVy = abs(nextVy) * 0.38f
+                    nextVx *= 0.68f
                 }
                 result.add(
                     p.copy(
                         x = nx,
-                        y = clampedY,
-                        vx = deflectedVx,
-                        vy = if (ny < gH && p.kind == ParticleKind.EXHAUST_FLAME) 1.8f else nextVy,
+                        y = ny,
+                        vx = nextVx,
+                        vy = nextVy,
                         life = nextLife,
                     )
                 )

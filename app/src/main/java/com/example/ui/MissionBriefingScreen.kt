@@ -80,6 +80,7 @@ import com.example.data.model.FlightLog
 import com.example.data.model.MissionCatalog
 import com.example.data.model.MissionDefinition
 import com.example.data.model.PilotProfile
+import com.example.ui.components.BrandCopyrightBadge
 import com.example.ui.theme.CockpitBorder
 import com.example.ui.theme.CriticalCrimson
 import com.example.ui.theme.SafeEmerald
@@ -96,11 +97,14 @@ fun MissionBriefingScreen(
     flightLogsState: UiState<List<FlightLog>>,
     selectedMission: MissionDefinition,
     syncError: String?,
+    isGuestMode: Boolean = false,
     onDismissSyncError: () -> Unit,
     onSelectMission: (MissionDefinition) -> Unit,
     onLaunchMission: (MissionDefinition) -> Unit,
+    onOpenSimplePhysicsLab: () -> Unit,
     onUpdatePreferences: (callsign: String?, tiltEnabled: Boolean?, soundEnabled: Boolean?) -> Unit,
     onDeleteLog: (String) -> Unit,
+    onRequestGoogleSignIn: () -> Unit = {},
     onSignOut: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -210,20 +214,36 @@ fun MissionBriefingScreen(
                         }
                     }
 
-                    IconButton(
-                        onClick = { showSettingsDialog = true },
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SpaceCarbon)
-                            .border(1.dp, CockpitBorder, RoundedCornerShape(12.dp))
-                            .testTag("settings_button"),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "إعدادات الطيران والحساب",
-                            tint = TelemetryCyan,
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = onOpenSimplePhysicsLab,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("open_simple_physics_button"),
+                        ) {
+                            Text(
+                                text = "مختبر Canvas",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = TelemetryCyan,
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showSettingsDialog = true },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SpaceCarbon)
+                                .border(1.dp, CockpitBorder, RoundedCornerShape(12.dp))
+                                .testTag("settings_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = "إعدادات الطيران والحساب",
+                                tint = TelemetryCyan,
+                            )
+                        }
                     }
                 }
 
@@ -260,6 +280,43 @@ fun MissionBriefingScreen(
                             }
                             TextButton(onClick = onDismissSyncError) {
                                 Text("إغلاق", color = MaterialTheme.colorScheme.onBackground)
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = isGuestMode) {
+                    Surface(
+                        color = TelemetryCyan.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp)
+                            .border(1.dp, TelemetryCyan.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "وضع محلي نشط • تسجيل دخول Google اختياري",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(
+                                onClick = onRequestGoogleSignIn,
+                                modifier = Modifier.testTag("optional_google_sign_in_button"),
+                            ) {
+                                Text(
+                                    text = "ربط حساب",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = TelemetryCyan,
+                                )
                             }
                         }
                     }
@@ -326,6 +383,11 @@ fun MissionBriefingScreen(
                                 )
                             }
                             item {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                BrandCopyrightBadge(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    compact = false,
+                                )
                                 Spacer(modifier = Modifier.height(12.dp))
                             }
                         }
@@ -345,10 +407,15 @@ fun MissionBriefingScreen(
     if (showSettingsDialog) {
         PilotSettingsDialog(
             profile = profile,
+            isGuestMode = isGuestMode,
             onDismiss = { showSettingsDialog = false },
             onSave = { callsign, tilt, sound ->
                 onUpdatePreferences(callsign, tilt, sound)
                 showSettingsDialog = false
+            },
+            onRequestGoogleSignIn = {
+                showSettingsDialog = false
+                onRequestGoogleSignIn()
             },
             onSignOut = {
                 showSettingsDialog = false
@@ -624,6 +691,8 @@ private fun FlightLogbookTab(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(modifier = Modifier.height(18.dp))
+                        BrandCopyrightBadge(compact = false)
                     }
                 }
             } else {
@@ -634,6 +703,14 @@ private fun FlightLogbookTab(
                 ) {
                     items(logs, key = { it.id.ifBlank { "${it.missionId}_${it.flightDurationSec}" } }) { log ->
                         FlightLogRow(log = log, onDelete = { if (log.id.isNotBlank()) onDeleteLog(log.id) })
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        BrandCopyrightBadge(
+                            modifier = Modifier.fillMaxWidth(),
+                            compact = false,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
             }
@@ -727,8 +804,10 @@ private fun FlightLogRow(
 @Composable
 private fun PilotSettingsDialog(
     profile: PilotProfile,
+    isGuestMode: Boolean,
     onDismiss: () -> Unit,
     onSave: (callsign: String, tiltEnabled: Boolean, soundEnabled: Boolean) -> Unit,
+    onRequestGoogleSignIn: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var callsign by remember(profile.callsign) { mutableStateOf(profile.callsign) }
@@ -794,17 +873,35 @@ private fun PilotSettingsDialog(
                         modifier = Modifier.testTag("sound_switch"),
                     )
                 }
-                OutlinedButton(
-                    onClick = onSignOut,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CriticalCrimson),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("sign_out_button"),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("تسجيل الخروج من الحساب")
+                if (isGuestMode) {
+                    OutlinedButton(
+                        onClick = onRequestGoogleSignIn,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TelemetryCyan),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_google_sign_in_button"),
+                    ) {
+                        Icon(Icons.Filled.RocketLaunch, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("تسجيل الدخول عبر Google (اختياري)")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onSignOut,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CriticalCrimson),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("sign_out_button"),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("تسجيل الخروج من الحساب")
+                    }
                 }
+                BrandCopyrightBadge(
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = true,
+                )
             }
         },
         confirmButton = {

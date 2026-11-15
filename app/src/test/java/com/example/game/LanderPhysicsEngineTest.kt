@@ -73,5 +73,26 @@ class LanderPhysicsEngineTest {
         }
         assertEquals(FlightPhase.CRASHED, state.phase)
         assertEquals(0, state.touchdownScore)
+        assertTrue(state.particles.any { it.kind == ParticleKind.EXPLOSION_SHOCKWAVE })
+        assertTrue(state.particles.any { it.kind == ParticleKind.EXPLOSION_FIREBALL })
+        assertTrue(state.particles.any { it.kind == ParticleKind.DEBRIS_SPARK })
+    }
+
+    @Test
+    fun fuelDepletionInAir_endsGameImmediately() {
+        val moon = MissionCatalog.byId("moon_tranquility")
+        var state = engine.createInitialState(moon).copy(
+            fuelKg = 0.25f,
+            targetThrottle = 1f,
+            actualThrottle = 1f,
+        )
+        repeat(10) {
+            if (state.phase == FlightPhase.FLYING) {
+                state = engine.step(state, 1f / 60f, rcsInput = 1f, tiltAngleTargetRad = null)
+            }
+        }
+        assertEquals(FlightPhase.CRASHED, state.phase)
+        assertEquals(0f, state.fuelKg, 0.001f)
+        assertTrue(state.failureReasonAr?.contains("نفاد الوقود") == true)
     }
 }
